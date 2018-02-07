@@ -8,22 +8,31 @@ import System.Random
 import Data.Set (Set)
 import qualified Data.Set as Set
 
-probSAT :: StdGen -> Int -> Int -> [Assignment] -> Formula -> (Maybe Assignment, StdGen)
-probSAT gen 0        _        _      _ = (Nothing, gen)
-probSAT gen maxTries maxFlips (a:as) f = case search gen maxFlips a f of
-  (Nothing, gen') -> probSAT gen' (maxTries - 1) maxFlips as f
-  (Just a, gen')  -> (Just a, gen')
+import Data.Foldable (minimumBy)
+
+import Data.Function (on)
+
+data Stat = Stat Int Int
+
+--------------------------------------------------------------------------------
+-- 'Old' Solver ----------------------------------------------------------------
+--------------------------------------------------------------------------------
+
+probSAT :: StdGen -> Int -> Int -> [Assignment] -> Formula -> Stat -> (Maybe Assignment, StdGen, Stat)
+probSAT gen 0        _        _      _ s = (Nothing, gen, s)
+probSAT gen maxTries maxFlips (a:as) f s@(Stat r _) = case search gen maxFlips a f 0 of
+  (Nothing, gen', _) -> probSAT gen' (maxTries - 1) maxFlips as f (Stat (r+1) 0)
+  (Just a, gen', fl) -> (Just a, gen', Stat r fl)
 
 
-search :: StdGen -> Int -> Assignment -> Formula -> (Maybe Assignment, StdGen)
-search gen 0        _ _ = (Nothing, gen)
-search gen maxFlips a f@(Formula _ cls)
-  | a `satisfies` f = (Just a, gen)
-  | otherwise       = search gen'' (maxFlips - 1) (flipVar l a) f
-
+search :: StdGen -> Int -> Assignment -> Formula -> Int -> (Maybe Assignment, StdGen, Int)
+search gen 0        _ _ fl = (Nothing, gen, fl)
+search gen maxFlips a f@(Formula _ cls) fl
+  | a `satisfies` f = (Just a, gen, fl)
+  | otherwise       = search gen'' (maxFlips - 1) (flipVar l a) f (fl + 1)
   where
     unsat = Set.filter (not . satisfies a) cls
-    (r, gen') = randomR (0,Set.size unsat) gen
+    (r, gen') = randomR (0,Set.size unsat - 1) gen
     Clause (l1,l2,l3) = Set.elemAt r unsat
     totalScore = score (getLit l1) a f + score (getLit l2) a f + score (getLit l3) a f
     (l, gen'') = distro gen'
@@ -52,3 +61,43 @@ score i a (Formula _ cls) = cb ** (-break)
     break = toEnum $ Set.size unsat' - Set.size unsat
 
     cb = 2.5
+
+--------------------------------------------------------------------------------
+-- 'New' Solver ----------------------------------------------------------------
+--------------------------------------------------------------------------------
+
+
+entropySAT :: StdGen -> Int -> Int -> [Assignment] -> Formula -> Stat -> (Maybe Assignment, StdGen, Stat)
+entropySAT gen 0        _        _      _ s = (Nothing, gen, s)
+entropySAT gen maxTries maxFlips (a:as) f s@(Stat t 0) = case search' gen maxFlips a f 0 of
+  (Nothing, gen', _) -> entropySAT gen' (maxTries - 1) maxFlips as f (Stat t 0)
+  (Just a, gen', fl)  -> (Just a, gen', Stat t fl)
+
+
+search' :: StdGen -> Int -> Assignment -> Formula -> Int -> (Maybe Assignment, StdGen, Int)
+search' gen 0        _ _ fl = (Nothing, gen, fl)
+search' gen maxFlips a f@(Formula _ cls) fl
+  | a `satisfies` f = (Just a, gen, fl)
+  | otherwise       = search' gen' (maxFlips - 1) (flipVar l a) f (fl+1)
+  where
+    unsat = Set.filter (not . satisfies a) cls
+    Clause (l1,l2,l3) = minimumBy (compare `on` entropy a f) unsat
+    totalScore = score (getLit l1) a f + score (getLit l2) a f + score (getLit l3) a f
+    (l, gen') = distro gen
+      [ (getLit l1, score (getLit l1) a f / totalScore)
+      , (getLit l2, score (getLit l2) a f / totalScore)
+      , (getLit l3, score (getLit l3) a f / totalScore) ]
+
+log2 :: Double -> Double
+log2 = logBase 2
+
+entropy :: Assignment -> Formula -> Clause -> Double
+entropy a f (Clause (l1,l2,l3)) = -p1 * log2 p1 - p2 * log2 p2 - p3 * log2 p3
+  where
+    s1 = score (getLit l1) a f
+    s2 = score (getLit l2) a f
+    s3 = score (getLit l3) a f
+    total = s1 + s2 + s3
+    p1 = s1 / total
+    p2 = s2 / total
+    p3 = s3 / total

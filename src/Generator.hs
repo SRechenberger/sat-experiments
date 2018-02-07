@@ -17,6 +17,10 @@ generate3CNF gen n m = (Formula n f, gen'')
     (a, gen')  = randomAssignment gen n
     (f, gen'') = generate3CNF' gen n m a Set.empty
 
+streamOfRandom3CNF :: StdGen -> Int -> Int -> [Formula]
+streamOfRandom3CNF gen n m = f : streamOfRandom3CNF gen' n m
+  where
+    (f, gen') = generate3CNF gen n m
 
 generate3CNF' :: StdGen -> Int -> Int -> Assignment -> Set Clause -> (Set Clause, StdGen)
 generate3CNF' gen _ 0 _ acc = (acc, gen) 
