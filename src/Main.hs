@@ -1,43 +1,30 @@
 module Main (main) where
 
 import Assignment
-import Formula3CNF
+-- import Formula3CNF
 import Generator
 import Solver
 
 import System.Random
 
-import Control.Monad (forM_)
+-- import Control.Monad (forM_)
 
-import Data.Maybe (isJust)
-import Data.List (intercalate)
+-- import Data.Maybe (isJust)
+-- import Data.List (intercalate)
 
 main :: IO ()
 main = do
-  (genF,genA) <- split <$> getStdGen
-
-  let t = 20
-
-  let n = 100
-  let m = 427
-
-  let fs = streamOfRandom3CNF genF n m
-      as = streamOfRandomAssignments genA n
-
-  let results = testFormulas genF t (fromEnum $ 100*n) n as fs
-  putStr
-    $ show
-    $ length
-    $ filter id
-    $ map (\(b, s, s') -> s > s')
-    $ results
-  putStrLn $ " of " ++ show t
+  let n = 50
+      m = 200
+      t = 1000 -- 20 * div (4^n) (3^n)
+  (genF, genAS) <- split <$> getStdGen
+  let (genA, genS) = split genAS
+      (f, _)   = generate3CNF genF n m
+      s            = streamOfRandomAssignments genA n
+      (r, _)       = probSAT (scoreExp 0.5 2.5 1) genS t (3*n) s f
+      (r', _)      = probSATWithEntropy (scoreExp 0.5 2.5 1) genS t (3*n) s f
+  print r
+  print r'
 
 
-testFormulas :: StdGen -> Int -> Int -> Int -> [Assignment] -> [Formula] -> [(Bool, Stat, Stat)]
-testFormulas _ 0 _ _ _ _ = []
-testFormulas gen n maxTries maxFlips as (f:fs) = (isJust a',s,s') : testFormulas gen' (n-1) maxTries maxFlips as fs
-  where
-    (a ,gen',s) = probSAT gen maxTries maxFlips as f (Stat 0 0)
-    (a',_  ,s') = entropySAT gen maxTries maxFlips as f (Stat 0 0)
-testFormulas _ _ _ _ _ _ = error "Fuck"
+
