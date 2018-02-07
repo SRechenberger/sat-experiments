@@ -1,8 +1,4 @@
-module Solver
-  ( probSAT
-  , probSATWithEntropy
-  , scoreExp
-  ) where
+module Solver where
 
 import Assignment
 import Formula3CNF
@@ -26,6 +22,15 @@ type Selector = Assignment -> Set Clause -> Rand StdGen Variable
 data SolverResult = SolverResult Assignment Tries Flips
   deriving Show
 
+compareSolverResult :: SolverResult -> SolverResult -> (Int, Int)
+compareSolverResult (SolverResult _ t f) (SolverResult _ t' f')
+  = (t-t',f-f')
+
+getFlips :: SolverResult -> Int
+getFlips (SolverResult _ _ f) = f
+
+getTries :: SolverResult -> Int
+getTries (SolverResult _ t _) = t
 
 --------------------------------------------------------------------------------
 -- Utilities -------------------------------------------------------------------
@@ -97,11 +102,21 @@ probSAT score = solver $ \assignment clauses -> do
   pure (getLit l)
 
 
+scorePoly :: Double  -- ^ c_m
+          -> Double  -- ^ c_b
+          -> Double  -- ^ eps
+          -> Score
+scorePoly cMake cBreak eps clauses assignment variable = (m ** cMake) / (eps + b ** cBreak)
+  where
+    m = makeScore  clauses assignment variable
+    b = breakScore clauses assignment variable
+
 scoreExp :: Double  -- ^ c_m
          -> Double  -- ^ c_b
          -> Double  -- ^ eps
          -> Score
-scoreExp cMake cBreak eps clauses assignment variable = (m ** cMake) / (eps + b ** cBreak)
+scoreExp cMake cBreak eps clauses assignment variable
+  = (cMake ** m) / (cBreak ** b)
   where
     m = makeScore  clauses assignment variable
     b = breakScore clauses assignment variable
