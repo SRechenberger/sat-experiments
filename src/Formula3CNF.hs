@@ -25,7 +25,7 @@ getLit (Neg x) = x
 
 instance Show Literal where
   show (Pos i) = "l_" ++ show i
-  show (Neg i) = "-l_" ++ show i
+  show (Neg i) = "¬l_" ++ show i
 
 
 newtype Clause = Clause (Literal, Literal, Literal)
@@ -33,7 +33,7 @@ newtype Clause = Clause (Literal, Literal, Literal)
 
 
 instance Show Clause where
-  show (Clause (c1,c2,c3)) = "(" ++ show c1 ++ " + " ++ show c2 ++ " + " ++ show c3 ++ ")"
+  show (Clause (c1,c2,c3)) = "(" ++ show c1 ++ " , " ++ show c2 ++ " , " ++ show c3 ++ ")"
 
 
 instance Satisfies Clause where
@@ -48,7 +48,7 @@ data Formula = Formula Int (Set Clause)
 
 
 instance Show Formula where
-  show (Formula _ cls) = intercalate " * " (map show (Set.toList cls))
+  show (Formula _ cls) = intercalate " , " (map show (Set.toList cls))
 
 
 instance Satisfies Formula where
