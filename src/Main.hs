@@ -16,16 +16,18 @@ main :: IO ()
 main = do
   (genF,genA) <- split <$> getStdGen
 
-  let n = 1000
-  let m = 4200
+  let n = 100
+  let m = 400
 
   let fs = streamOfRandom3CNF genF n m
       as = streamOfRandomAssignments genA n
 
-  let results = testFormulas genF 1 10 (20*(4 * m) `div` 3) as fs
+  let results = testFormulas genF 20 10 (20*(4 * m) `div` 3) as fs
   putStrLn
-    $ intercalate "\n"
-    $ map (\(b, Stat tr fl,Stat tr' fl') -> show tr ++ " " ++ show fl ++ " | " ++ show tr' ++ " " ++ show fl' ++ " | " ++ show b)
+    $ show
+    $ length
+    $ filter id
+    $ map (\(_, s, s') -> s > s')
     $ results
 
 

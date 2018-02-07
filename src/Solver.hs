@@ -8,11 +8,12 @@ import System.Random
 import Data.Set (Set)
 import qualified Data.Set as Set
 
-import Data.Foldable (minimumBy)
+import Data.Foldable (minimumBy, maximumBy)
 
 import Data.Function (on)
 
 data Stat = Stat Int Int
+  deriving (Eq, Ord)
 
 --------------------------------------------------------------------------------
 -- 'Old' Solver ----------------------------------------------------------------
