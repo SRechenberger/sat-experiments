@@ -19,18 +19,10 @@ type Flips = Int
 type Variable = Int
 type Selector = Assignment -> Set Clause -> Rand StdGen Variable
 
-data SolverResult = SolverResult Assignment Tries Flips
-  deriving Show
+type SolverResult = (Assignment, Flips)
 
-compareSolverResult :: SolverResult -> SolverResult -> (Int, Int)
-compareSolverResult (SolverResult _ t f) (SolverResult _ t' f')
-  = (t-t',f-f')
-
-getFlips :: SolverResult -> Int
-getFlips (SolverResult _ _ f) = f
-
-getTries :: SolverResult -> Int
-getTries (SolverResult _ t _) = t
+compareFlips :: SolverResult -> SolverResult -> Int
+compareFlips (_, f) (_, f') = f' - f
 
 --------------------------------------------------------------------------------
 -- Utilities -------------------------------------------------------------------
@@ -73,22 +65,28 @@ fromListMay xs = do
 solver :: Selector -> StdGen -> Tries -> Flips -> [Assignment] -> Formula -> (Maybe SolverResult, StdGen)
 solver selector gen tries flips supply formula = runRand (solver' selector tries flips supply 0 formula) gen
 
-solver' :: Selector -> Tries -> Flips -> [Assignment] -> Tries -> Formula -> Rand StdGen (Maybe SolverResult)
+solver' :: Selector -> Tries -> Flips -> [Assignment] -> Flips -> Formula -> Rand StdGen (Maybe SolverResult)
 solver' _        0        _        _      _     _ = pure Nothing
 solver' _        _        _        []     _     _ = pure Nothing
-solver' selector maxTries maxFlips (a:as) tries f = do
-  mr <- search maxFlips selector 0 a f
+solver' selector maxTries maxFlips (a:as) flips f = do
+  mr <- search maxFlips selector a f
   case mr of
-    Nothing         -> solver' selector (maxTries - 1) maxFlips as (tries + 1) f
-    Just (a',flips) -> pure $ Just $ SolverResult a' tries flips
+    -- if the 'search' was unsuccessful, repeat
+    Nothing          -> solver' selector (maxTries - 1) maxFlips as (flips + maxFlips) f
+    -- otherwise, return the found assignment
+    -- as well as the total number of flips needed to find it
+    -- including all restarts (#restarts * maxFlips)
+    Just (a',flips') -> pure $ Just $ (a', flips + (maxFlips - flips'))
 
-search :: Flips -> Selector -> Flips -> Assignment -> Formula -> Rand StdGen (Maybe (Assignment, Flips))
-search 0        _        _     _ _ = pure Nothing
-search maxFlips selector flips a f@(Formula _ cls)
-  | a `satisfies` f = pure $ Just (a, flips)
+search :: Flips -> Selector -> Assignment -> Formula -> Rand StdGen (Maybe (Assignment, Flips))
+search 0        _        _ _ = pure Nothing
+search maxFlips selector a f@(Formula _ cls)
+  -- if a satisfying assignment is found, return it and the remaining flips
+  | a `satisfies` f = pure $ Just (a, maxFlips)
+  -- otherweise choose a literal, flip it and repeat
   | otherwise       = do
       variable <- selector a cls
-      search (maxFlips - 1) selector (flips + 1) (flipVar variable a) f
+      search (maxFlips - 1) selector (flipVar variable a) f
 
 
 --------------------------------------------------------------------------------
