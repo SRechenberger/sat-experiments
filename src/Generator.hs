@@ -1,3 +1,12 @@
+--------------------------------------------------------------------------------
+-- Generator for Random 3CNF Formulas; implemented according to
+--
+-- Uwe Schöning and Jacobo Torán.
+-- The Satisfiability Problem: Algorithms and Analyses.
+-- Vol. 3. Lehmanns Media, 2013.
+-- Chapter 7.2
+--------------------------------------------------------------------------------
+
 module Generator where
 
 import Assignment
@@ -29,9 +38,16 @@ generate3CNF' gen n m a acc
   | otherwise = generate3CNF' gen'' n (m-1) a (Set.insert c acc)
   where
     ((x,y,z), gen') = chooseVars gen n
-    (r, gen'') = randomR (0,6) gen'
-    c = [ cl | l1 <- [Pos x, Neg x], l2 <- [Pos y, Neg y], l3 <- [Pos z, Neg z], let cl = Clause (l1,l2,l3), a `satisfies` cl ] !! r
+    (r, gen'') = randomR (0.0,1.0) gen'
+    c = choose r [ (cl, clauseProb a cl) | l1 <- [Pos x, Neg x], l2 <- [Pos y, Neg y], l3 <- [Pos z, Neg z], let cl = Clause (l1,l2,l3), a `satisfies` cl ]
 
+choose :: Double -> [(a, Double)] -> a
+choose = choose' 0
+
+choose' :: Double -> Double -> [(a,Double)] -> a
+choose' _    _ []         = error $ "choose: empty list."
+choose' pAcc r ((x,p):xs) | r <= pAcc + p = x
+                          | otherwise     = choose' (pAcc+p) r xs
 
 chooseVars :: StdGen -> Int -> ((Int,Int,Int), StdGen)
 chooseVars gen n = ((x,y,z), gen')
@@ -47,4 +63,8 @@ chooseVars gen n = ((x,y,z), gen')
         (r,g) = randomR (0,n-1) gen
         
 
-
+clauseProb :: Assignment -> Clause -> Double
+clauseProb a clause = case satisfiedLiterals a clause of
+  1 -> 0.191
+  2 -> 0.118
+  3 -> 0.073 

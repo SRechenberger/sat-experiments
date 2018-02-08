@@ -23,6 +23,10 @@ getLit :: Literal -> Int
 getLit (Pos x) = x
 getLit (Neg x) = x
 
+instance Satisfies Literal where
+  satisfies a (Pos x) = testVar x a
+  satisfies a (Neg x) = not $ testVar x a
+
 instance Show Literal where
   show (Pos i) = "l_" ++ show i
   show (Neg i) = "¬l_" ++ show i
@@ -37,12 +41,13 @@ instance Show Clause where
 
 
 instance Satisfies Clause where
-  satisfies a (Clause (l1,l2,l3)) = testLiteral l1 || testLiteral l2 || testLiteral l3
-    where
-      testLiteral :: Literal -> Bool
-      testLiteral (Pos x) = testVar x a
-      testLiteral (Neg x) = not $ testVar x a
+  satisfies a (Clause (l1,l2,l3)) = satisfies a l1 || satisfies a l2 || satisfies a l3
 
+satisfiedLiterals :: Assignment -> Clause -> Int
+satisfiedLiterals a (Clause (l1,l2,l3)) = ind (satisfies a l1) + ind (satisfies a l2) + ind (satisfies a l3)
+  where
+    ind True  = 1
+    ind False = 0
 
 data Formula = Formula Int !(Set Clause)
 

@@ -16,6 +16,8 @@ data Assignment = Assignment Int !Integer
 
 varCnt :: Assignment -> Int
 varCnt (Assignment x _) = x
+{-# INLINE varCnt #-}
+
 
 randomAssignment :: StdGen -> Int -> (Assignment, StdGen)
 randomAssignment gen vars = (assignment,gen')
@@ -30,18 +32,12 @@ randomAssignment gen vars = (assignment,gen')
 
 
 flipVar :: Int -> Assignment -> Assignment
-flipVar idx (Assignment vars assg)
-  | idx >= vars = error $ "flip: out of bounds: " ++ show idx ++ " >= " ++ show vars
-  | idx < 0     = error $ "flip: negative index: " ++ show idx 
-  | otherwise   = Assignment vars (assg `complementBit` idx)
-
+flipVar idx (Assignment vars assg) = Assignment vars (assg `complementBit` idx)
+{-# INLINE flipVar #-}
 
 testVar :: Int -> Assignment -> Bool
-testVar idx (Assignment vars assg)
-  | idx >= vars = error $ "testVar: out of bounds: " ++ show idx ++ " >= " ++ show vars
-  | idx < 0     = error $ "testVar: negative index: " ++ show idx 
-  | otherwise   = testBit assg idx
-
+testVar idx (Assignment vars assg) = testBit assg idx
+{-# INLINE testVar #-}
 
 streamOfRandomAssignments :: StdGen -> Int -> [Assignment]
 streamOfRandomAssignments gen len = assg : streamOfRandomAssignments gen' len

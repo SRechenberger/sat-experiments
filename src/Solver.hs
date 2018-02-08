@@ -3,6 +3,7 @@ module Solver where
 import Assignment
 import Formula3CNF
 import Control.Monad.Random hiding (fromListMay, fromList)
+import Control.Arrow
 -- import System.Random
 
 import Data.Set (Set)
@@ -23,35 +24,6 @@ type SolverResult = (Assignment, Flips)
 
 compareFlips :: SolverResult -> SolverResult -> Int
 compareFlips (_, f) (_, f') = f' - f
-
---------------------------------------------------------------------------------
--- Utilities -------------------------------------------------------------------
---------------------------------------------------------------------------------
-
--- From: 
---  https://hackage.haskell.org/package/MonadRandom-0.5.1/docs/src/Control-Monad-Random-Class.html#fromList
-
--- | Sample a random value from a weighted list.  The list must be
---   non-empty and the total weight must be non-zero.
-fromList :: (MonadRandom m) => [(a, Double)] -> m a
-fromList ws = do
-  ma <- fromListMay ws
-  case ma of
-    Nothing -> error "Control.Monad.Random.Class.fromList: empty list, or total weight = 0"
-    Just a  -> return a
-
--- | Sample a random value from a weighted list.  Return @Nothing@ if
---   the list is empty or the total weight is zero.
-fromListMay :: (MonadRandom m) => [(a, Double)] -> m (Maybe a)
-fromListMay xs = do
-  let s    = sum (map snd xs) :: Double
-      cums = scanl1 (\ ~(_,q) ~(y,s') -> (y, s'+q)) xs
-  case s of
-    0 -> return Nothing
-    _ -> do
-      p <- getRandomR (0, s)
-      return . Just . fst . head . dropWhile ((< p) . snd) $ cums
-
 
 --------------------------------------------------------------------------------
 -- Generic ProbSAT -------------------------------------------------------------
@@ -100,9 +72,13 @@ probSAT score = solver $ \assignment clauses -> do
   let unsat = Set.filter (not . satisfies assignment) clauses
   Clause (x,y,z) <- uniform unsat
   let lits = map getLit [x,y,z]
-      [sx,sy,sz] = map (score clauses assignment) lits
+      ss@[sx,sy,sz] = map (score clauses assignment) lits
       total = sx + sy + sz
-  l <- fromList [(x,sx/total),(y,sy/total),(z,sz/total)]
+      [px,py,pz] = map (/ total) ss
+  r <- getRandomR (0,1)
+  let l | r <= px    = x
+        | r <= px+py = y
+        | otherwise  = z
   pure (getLit l)
 
 
@@ -114,29 +90,34 @@ scorePoly cMake cBreak eps clauses assignment variable = (m ** cMake) / (eps + b
   where
     m = makeScore  clauses assignment variable
     b = breakScore clauses assignment variable
+{-# INLINE scorePoly #-}
+
 
 scoreExp :: Double  -- ^ c_m
          -> Double  -- ^ c_b
          -> Double  -- ^ eps
          -> Score
-scoreExp cMake cBreak eps clauses assignment variable
-  = (cMake ** m) / (eps + cBreak ** b)
+scoreExp cMake cBreak eps clauses assignment variable = (cMake ** m) / (eps + cBreak ** b)
   where
     m = makeScore  clauses assignment variable
     b = breakScore clauses assignment variable
+{-# INLINE scoreExp #-}
+
 
 makeScore :: Set Clause -> Assignment -> Variable -> Double
 makeScore cs a v = toEnum made
   where
     made = Set.size
       $ Set.filter (\c -> satisfies (flipVar v a) c && not (satisfies a c)) cs
+{-# INLINE makeScore #-}
+
 
 breakScore :: Set Clause -> Assignment -> Variable -> Double
 breakScore cs a v = toEnum broken
   where
     broken = Set.size
       $ Set.filter (\c -> not (satisfies (flipVar v a) c) && satisfies a c) cs
-
+{-# INLINE breakScore #-}
 --------------------------------------------------------------------------------
 -- ProbSAT using Entropy -------------------------------------------------------
 --------------------------------------------------------------------------------
@@ -146,21 +127,29 @@ probSATWithEntropy score = solver $ \assignment clauses -> do
   let unsat          = Set.filter (not . satisfies assignment) clauses
       c@(Clause (x,y,z)) = minimumBy (compare `on` entropy clauses assignment score) unsat
       lits           = map getLit [x,y,z]
-      [sx,sy,sz]     = map (score clauses assignment) lits
+      ss@[sx,sy,sz]  =  map (score clauses assignment) lits
       total          = sx + sy + sz
-  l <- fromList [(x,sx/total),(y,sy/total),(z,sz/total)]
-  -- DEBUG.trace ("H("++show c++") = " ++ show (entropy clauses assignment score c)) (return ())
+      [px,py,pz] = map (/ total) ss
+  r <- getRandomR (0,1)
+  let l | r <= px    = x
+        | r <= px+py = y
+        | otherwise  = z
   pure (getLit l)
+
 
 log2 :: Double -> Double
 log2 = logBase 2
+{-# INLINE log2 #-}
 
-entropy' :: [Double] -> Double
-entropy' = sum . map (\p -> - p * log2 p)
+
+entropy' :: Double -> Double -> Double -> Double
+entropy' p1 p2 p3 = - p1 * log2 p1 - p2 * log2 p2 - p3 * log2 p3
+{-# INLINE entropy' #-}
+
 
 entropy :: Set Clause -> Assignment -> Score -> Clause -> Double
-entropy clauses assignment score (Clause (lx,ly,lz)) = entropy' (map (/ total) s)
+entropy clauses assignment score (Clause (lx,ly,lz)) = entropy' (sx/total) (sy/total) (sz/total)
   where
-    lits = map getLit [lx,ly,lz]
-    s@[sx,sy,sz] = map (score clauses assignment) lits
+    s@[sx,sy,sz] = map (getLit >>> score clauses assignment) [lx,ly,lz]
     total = sx + sy + sz
+{-# INLINE entropy #-}

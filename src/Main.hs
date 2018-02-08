@@ -78,94 +78,34 @@ main = do
       (Just (a1, fl1), Just (a2, fl2))
         -- For debuggin reasons (who knows, what may happen...)
         | not (a1 `satisfies` f) -> do
-            putStrLn $ "!! probSAT error: " ++ show a1 ++ " does not satisfy " ++ show f
-            pure Nothing
+            error $ "probSAT error: " ++ show a1 ++ " does not satisfy " ++ show f            
         | not (a2 `satisfies` f) -> do
-            putStrLn $ "!! probSATWithEntropy error: " ++ show a2 ++ " does not satisfy " ++ show f
-            pure Nothing
+            error $ "probSATWithEntropy error: " ++ show a2 ++ " does not satisfy " ++ show f
         -- expected cases
-        | fl1 <= fl2 -> do
-            let p = 1 - percents fl1 fl2
-            -- putStrLn $ "probSAT was\t" ++ (printf "%.2f" (p*100)) ++ "% faster (" ++ show fl1 ++ " flips vs " ++ show fl2 ++ " flips)" 
-            pure (Just (p, fl1, fl2, False))
-        | fl1 > fl2 -> do
-            let p = 1 - percents fl2 fl1
-            -- putStrLn $ "probSATWithEntropy was\t" ++ (printf "%.2f" (p*100)) ++ "% faster (" ++ show fl2 ++ " flips vs " ++ show fl1 ++ " flips)"
-            pure (Just (p, fl2, fl1, True))
+        | otherwise -> pure (fl1, fl2)
 
       (Just (a1, fl1), Nothing)
         | not (a1 `satisfies` f) -> do
-            putStrLn $ "!! probSAT error: " ++ show a1 ++ " does not satisfy " ++ show f
-            pure Nothing
-        | otherwise -> do
-            -- putStrLn $ "probSATWithEntropy found no solution."
-            let p = 1 - percents fl1 (t*l)
-            pure (Just (p, fl1, t*l, False))
+            error $ "probSAT error: " ++ show a1 ++ " does not satisfy " ++ show f
+        | otherwise -> pure (fl1, t*l*10)
 
       (Nothing, Just (a2, fl2))
         | not (a2 `satisfies` f) -> do
-            putStrLn $ "!! probSATWithEntropy error: " ++ show a2 ++ " does not satisfy " ++ show f
-            pure Nothing
-        | otherwise -> do
-            -- putStrLn $ "probSAT found no solution."
-            let p = 1 - percents fl2 (t*l)
-            pure (Just (p, fl2, t*l, True))
+            error $ "probSATWithEntropy error: " ++ show a2 ++ " does not satisfy " ++ show f
+        | otherwise -> pure (t*l*10, fl2)
 
       (Nothing, Nothing) -> do
-            -- putStrLn $ "No solution found."
-            pure (Just (0, t*l, t*l, False))
+            pure (t*l*10, t*l*10)
   
   -- evaluate final results
-  let finalResult = catMaybes finalResult'
-      (pSatH, pSat) = partition (\(_,_,_,b) -> b)
-        >>> (let drp (a,b,c,_) = (a,b,c) in map drp *** map drp)
-        $ finalResult
-  putStrLn $ "Final Result of " ++ show e ++ " tests:"
-  putStrLn $ "  Normal probSAT:" 
-  putStrLn $ "    Tests won:\t" ++ show (length pSat)
-  putStrLn $ let (rel,abs) = minAdvantage pSat
-          in "    Minimum advantage:\t" ++ show abs ++ " (" ++ printf "%.2f" (100*rel) ++" %)" 
-  putStrLn $ let (rel,abs) = maxAdvantage pSat
-          in "    Maximum advantage:\t" ++ show abs ++ " (" ++ printf "%.2f" (100*rel) ++"%)"
-  putStrLn $ let (rel,abs) = avgAdvantage pSat
-          in "    Average advantage:\t" ++ printf "%.2f" abs ++ " (" ++ printf "%.2f" (100*rel) ++"%)"
-  putStrLn $ "  probSAT with entropy heuristic:" 
-  putStrLn $ "    Tests won:\t" ++ show (length pSatH)
-  putStrLn $ let (rel,abs) = minAdvantage pSatH
-          in "    Minimum advantage:\t" ++ show abs ++ " (" ++ printf "%.2f" (100*rel) ++"%)" 
-  putStrLn $ let (rel,abs) = maxAdvantage pSatH
-          in "    Maximum advantage:\t" ++ show abs ++ " (" ++ printf "%.2f" (100*rel) ++"%)"
-  putStrLn $ let (rel,abs) = avgAdvantage pSatH
-          in "    Average advantage:\t" ++ printf "%.2f" abs ++ " (" ++ printf "%.2f" (100*rel) ++"%)"
+  let r = unzip finalResult'
+      (avPSat, avPSatH) = map toEnum *** map toEnum >>> avg *** avg $ r
+      (minPSat, minPSatH) = minimum *** minimum $ r
+      (maxPSat, maxPSatH) = maximum *** maximum $ r
+
+  printf "normal probSAT:  average = %7.2f minimum = %5d maximum = %5d\n" avPSat minPSat maxPSat
+  printf "entropy-probSAT: average = %7.2f minimum = %5d maximum = %5d\n" avPSatH minPSatH maxPSatH
 
 
-
-
-percents :: Int -> Int -> Double
-percents a b = toEnum a / toEnum b 
-
-minAdvantage :: [(Double, Int, Int)] -> (Double, Int)
-minAdvantage = minimumBy (compare `on` fst3) >>> (\(p,f1,f2) -> (p,f2-f1))
-
-maxAdvantage :: [(Double, Int, Int)] -> (Double, Int)
-maxAdvantage = maximumBy (compare `on` fst3) >>> (\(p,f1,f2) -> (p,f2-f1))
-
-avgAdvantage :: [(Double, Int, Int)] -> (Double, Double)
-avgAdvantage results =
-    map (\(p,f1,f2) -> (p,f2-f1))  -- [(Double, Int, Int)] -> [(Double, Int)]
-    >>> unzip                      -- [(Double, Int)]      -> ([Double],[Int]) 
-    >>> sum *** sum                -- ([Double],[Int])     -> (Double, Int)
-    >>> second toEnum              -- (Double, Int)        -> (Double, Double)
-    >>> (/ len) *** (/ len)        -- (Double, Double)     -> (Double, Double)
-    $ results
-  where
-    len = toEnum $ length results
-
-fst3 :: (a,b,c) -> a
-fst3 (a,_,_) = a
-
-snd3 :: (a,b,c) -> b
-snd3 (_,b,_) = b
-
-thd3 :: (a,b,c) -> c
-thd3 (_,_,c) = c
+avg :: [Double] -> Double
+avg ds = sum ds / toEnum (length ds)
