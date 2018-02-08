@@ -8,11 +8,11 @@ import Control.Monad.Random hiding (fromListMay, fromList)
 import Data.Set (Set)
 import qualified Data.Set as Set
 
-import Data.Foldable (minimumBy)
+import Data.Foldable (minimumBy, maximumBy)
 
 import Data.Function (on)
 
--- import qualified Debug.Trace as DEBUG
+import qualified Debug.Trace as DEBUG
 
 type Tries = Int
 type Flips = Int
@@ -120,7 +120,7 @@ scoreExp :: Double  -- ^ c_m
          -> Double  -- ^ eps
          -> Score
 scoreExp cMake cBreak eps clauses assignment variable
-  = (cMake ** m) / (cBreak ** b)
+  = (cMake ** m) / (eps + cBreak ** b)
   where
     m = makeScore  clauses assignment variable
     b = breakScore clauses assignment variable
@@ -146,11 +146,12 @@ breakScore cs a v = toEnum broken
 probSATWithEntropy :: Score -> StdGen -> Tries -> Flips -> [Assignment] -> Formula -> (Maybe SolverResult, StdGen)
 probSATWithEntropy score = solver $ \assignment clauses -> do
   let unsat          = Set.filter (not . satisfies assignment) clauses
-      Clause (x,y,z) = minimumBy (compare `on` entropy clauses assignment score) unsat
+      c@(Clause (x,y,z)) = maximumBy (compare `on` entropy clauses assignment score) unsat
       lits           = map getLit [x,y,z]
       [sx,sy,sz]     = map (score clauses assignment) lits
       total          = sx + sy + sz
   l <- fromList [(x,sx/total),(y,sy/total),(z,sz/total)]
+  -- DEBUG.trace ("H("++show c++") = " ++ show (entropy clauses assignment score c)) (return ())
   pure (getLit l)
 
 log2 :: Double -> Double

@@ -16,18 +16,16 @@ import Control.Monad (forM)
 import Control.Arrow
 import Control.Concurrent (forkIO, newEmptyMVar, putMVar, readMVar)
 
+import Text.Printf
+
 -- import Data.Maybe (isJust)
 -- import Data.List (intercalate)
-
-gamma :: Double
-gamma = 4.27
-
 
 
 main :: IO ()
 main = do
   -- Setup parameters
-  args@[n', e', gamma', cb', cm', eps'] <- getArgs
+  args@[n', e', gamma', cb', cm', eps', s] <- getArgs
   print args
   let n     = read n'                       -- number of variables
       e     = read e'                       -- number of experiments
@@ -36,11 +34,15 @@ main = do
       t     = 20 * fromEnum ((4/3)^n)       -- number of tries
       l     = 3*n                           -- number of flips
 
-      cb    = read cb' :: Double            -- break weight
-      cm    = read cm' :: Double            -- make weight
-      eps   = read eps'                     
-    
-  -- Generating Formulas  
+      cb    = read cb'                      -- break weight
+      cm    = read cm'                      -- make weight
+      eps   = read eps'
+  let scr = case s of
+              "poly" -> scorePoly cm cb eps
+              "exp" -> scoreExp cm cb eps
+              other -> error $ "Option \"" ++ other ++"\" is no valid option."
+
+  -- Generating Formulas
   genF <- getStdGen
   let fs = take e (streamOfRandom3CNF genF n m)
 
@@ -49,22 +51,19 @@ main = do
     mvar2 <- newEmptyMVar
 
     -- generate supply of random assignments
-    genA <- getStdGen
+    (genA,genS) <- split <$> getStdGen
     let as = streamOfRandomAssignments genA n
 
     -- Sparking thread for normal probSAT
     forkIO $ do
-      genS <- getStdGen
-      let r = fst $ probSAT (scorePoly cm cb eps) genS t l as f 
+      let r = fst $ probSAT scr genS t l as f 
       putStrLn $ "probSAT finished formula " ++ show i 
       putMVar mvar1 r
 
     -- Sparking thread for probSAT with entropy heuristic
     forkIO $ do
-      genS <- getStdGen
-      let r = fst $ probSATWithEntropy (scorePoly cm cb eps) genS t l as f 
+      let r = fst $ probSATWithEntropy scr genS t l as f 
       putStrLn $ "probSATWithEntropy finished formula " ++ show i 
-
       putMVar mvar2 r
 
     putStrLn $ "Threads for Formula " ++ show i ++ " sparked."
@@ -87,11 +86,11 @@ main = do
         -- expected cases
         | fl1 <= fl2 -> do
             let p = 1 - percents fl1 fl2
-            putStrLn $ "probSAT was\t" ++ show p ++ "% faster (" ++ show fl1 ++ "flips vs " ++ show fl2 ++ " flips)" 
+            putStrLn $ "probSAT was\t" ++ (printf "%.2f" (p*100)) ++ "% faster (" ++ show fl1 ++ " flips vs " ++ show fl2 ++ " flips)" 
             pure (Just (p, fl1, fl2, False))
         | fl1 > fl2 -> do
-            let p = 1 - percents fl2 fl1            
-            putStrLn $ "probSATWithEntropy was\t" ++ show p ++ "% faster (" ++ show fl2 ++ "flips vs " ++ show fl1 ++ " flips)"
+            let p = 1 - percents fl2 fl1
+            putStrLn $ "probSATWithEntropy was\t" ++ (printf "%.2f" (p*100)) ++ "% faster (" ++ show fl2 ++ " flips vs " ++ show fl1 ++ " flips)"
             pure (Just (p, fl2, fl1, True))
 
       (Just (a1, fl1), Nothing)
@@ -118,26 +117,26 @@ main = do
   
   -- evaluate final results
   let finalResult = catMaybes finalResult'
-      (pSat, pSatH) = partition (\(_,_,_,b) -> b)
+      (pSatH, pSat) = partition (\(_,_,_,b) -> b)
         >>> (let drp (a,b,c,_) = (a,b,c) in map drp *** map drp)
         $ finalResult
   putStrLn $ "Final Result of " ++ show e ++ " tests:"
   putStrLn $ "  Normal probSAT:" 
   putStrLn $ "    Tests won:\t" ++ show (length pSat)
   putStrLn $ let (rel,abs) = minAdvantage pSat
-          in "    Minimum advantage:\t" ++ show abs ++ " (" ++ show rel ++"%)" 
+          in "    Minimum advantage:\t" ++ show abs ++ " (" ++ printf "%.2f" rel ++" %)" 
   putStrLn $ let (rel,abs) = maxAdvantage pSat
-          in "    Maximum advantage:\t" ++ show abs ++ " (" ++ show rel ++"%)"
+          in "    Maximum advantage:\t" ++ show abs ++ " (" ++ printf "%.2f" rel ++"%)"
   putStrLn $ let (rel,abs) = avgAdvantage pSat
-          in "    Average advantage:\t" ++ show abs ++ " (" ++ show rel ++"%)"
+          in "    Average advantage:\t" ++ show abs ++ " (" ++ printf "%.2f" rel ++"%)"
   putStrLn $ "  probSAT with entropy heuristic:" 
   putStrLn $ "    Tests won:\t" ++ show (length pSatH)
   putStrLn $ let (rel,abs) = minAdvantage pSatH
-          in "    Minimum advantage:\t" ++ show abs ++ " (" ++ show rel ++"%)" 
+          in "    Minimum advantage:\t" ++ show abs ++ " (" ++ printf "%.2f" rel ++"%)" 
   putStrLn $ let (rel,abs) = maxAdvantage pSatH
-          in "    Maximum advantage:\t" ++ show abs ++ " (" ++ show rel ++"%)"
+          in "    Maximum advantage:\t" ++ show abs ++ " (" ++ printf "%.2f" rel ++"%)"
   putStrLn $ let (rel,abs) = avgAdvantage pSatH
-          in "    Average advantage:\t" ++ show abs ++ " (" ++ show rel ++"%)"
+          in "    Average advantage:\t" ++ show abs ++ " (" ++ printf "%.2f" rel ++"%)"
 
 
 
