@@ -36,7 +36,8 @@ getTries (SolverResult _ t _) = t
 -- Utilities -------------------------------------------------------------------
 --------------------------------------------------------------------------------
 
--- From https://hackage.haskell.org/package/MonadRandom-0.5.1/docs/src/Control-Monad-Random-Class.html#fromList
+-- From: 
+--  https://hackage.haskell.org/package/MonadRandom-0.5.1/docs/src/Control-Monad-Random-Class.html#fromList
 
 -- | Sample a random value from a weighted list.  The list must be
 --   non-empty and the total weight must be non-zero.
@@ -64,6 +65,11 @@ fromListMay xs = do
 -- Generic ProbSAT -------------------------------------------------------------
 --------------------------------------------------------------------------------
 
+-- | This generic version, as well as 'probSAT' are implemented according to
+--   Balint, Adrian, and Uwe Schöning. 
+--   "Choosing probability distributions for stochastic local search and the role of make versus break." 
+--   International Conference on Theory and Applications of Satisfiability Testing.
+--   Springer, Berlin, Heidelberg, 2012.
 solver :: Selector -> StdGen -> Tries -> Flips -> [Assignment] -> Formula -> (Maybe SolverResult, StdGen)
 solver selector gen tries flips supply formula = runRand (solver' selector tries flips supply 0 formula) gen
 
