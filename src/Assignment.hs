@@ -11,7 +11,7 @@ import Data.Bits (complementBit, testBit)
 import System.Random (randomR, StdGen)
 
 
-data Assignment = Assignment Int Integer
+data Assignment = Assignment Int !Integer
   deriving (Show, Eq)
 
 varCnt :: Assignment -> Int

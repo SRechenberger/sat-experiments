@@ -15,8 +15,8 @@ class Satisfies a where
 
 
 data Literal
-  = Pos Int
-  | Neg Int
+  = Pos !Int
+  | Neg !Int
   deriving (Eq, Ord)
 
 getLit :: Literal -> Int
@@ -44,7 +44,7 @@ instance Satisfies Clause where
       testLiteral (Neg x) = not $ testVar x a
 
 
-data Formula = Formula Int (Set Clause)
+data Formula = Formula Int !(Set Clause)
 
 
 instance Show Formula where

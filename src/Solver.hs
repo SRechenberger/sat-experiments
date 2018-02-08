@@ -128,16 +128,14 @@ scoreExp cMake cBreak eps clauses assignment variable
 makeScore :: Set Clause -> Assignment -> Variable -> Double
 makeScore cs a v = toEnum made
   where
-    sat   = Set.filter (satisfies (flipVar v a)) cs
-    unsat = Set.filter (not . satisfies a) cs
-    made  = Set.size $ Set.intersection sat unsat
+    made = Set.size
+      $ Set.filter (\c -> satisfies (flipVar v a) c && not (satisfies a c)) cs
 
 breakScore :: Set Clause -> Assignment -> Variable -> Double
 breakScore cs a v = toEnum broken
   where
-    unsat  = Set.filter (satisfies (flipVar v a)) cs
-    sat    = Set.filter (not . satisfies a) cs
-    broken = Set.size $ Set.intersection sat unsat
+    broken = Set.size
+      $ Set.filter (\c -> not (satisfies (flipVar v a) c) && satisfies a c) cs
 
 --------------------------------------------------------------------------------
 -- ProbSAT using Entropy -------------------------------------------------------
@@ -146,7 +144,7 @@ breakScore cs a v = toEnum broken
 probSATWithEntropy :: Score -> StdGen -> Tries -> Flips -> [Assignment] -> Formula -> (Maybe SolverResult, StdGen)
 probSATWithEntropy score = solver $ \assignment clauses -> do
   let unsat          = Set.filter (not . satisfies assignment) clauses
-      c@(Clause (x,y,z)) = maximumBy (compare `on` entropy clauses assignment score) unsat
+      c@(Clause (x,y,z)) = minimumBy (compare `on` entropy clauses assignment score) unsat
       lits           = map getLit [x,y,z]
       [sx,sy,sz]     = map (score clauses assignment) lits
       total          = sx + sy + sz
