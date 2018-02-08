@@ -2,126 +2,162 @@ module Solver where
 
 import Assignment
 import Formula3CNF
-import Control.Monad.Random
-import System.Random
+import Control.Monad.Random hiding (fromListMay, fromList)
+-- import System.Random
 
 import Data.Set (Set)
 import qualified Data.Set as Set
 
-import Data.Foldable (minimumBy, maximumBy)
+import Data.Foldable (minimumBy)
 
 import Data.Function (on)
 
-import qualified Debug.Trace as DEBUG
+-- import qualified Debug.Trace as DEBUG
 
-data Stat = Stat Int Int
-  deriving (Eq, Ord)
+type Tries = Int
+type Flips = Int
+type Variable = Int
+type Selector = Assignment -> Set Clause -> Rand StdGen Variable
 
-instance Show Stat where
-  show (Stat r f) = "(" ++ show r ++ "," ++ show f ++ ")"
+data SolverResult = SolverResult Assignment Tries Flips
+  deriving Show
 
---------------------------------------------------------------------------------
--- 'Old' Solver ----------------------------------------------------------------
---------------------------------------------------------------------------------
+compareSolverResult :: SolverResult -> SolverResult -> (Int, Int)
+compareSolverResult (SolverResult _ t f) (SolverResult _ t' f')
+  = (t-t',f-f')
 
-probSAT :: StdGen -> Int -> Int -> [Assignment] -> Formula -> Stat -> (Maybe Assignment, StdGen, Stat)
-probSAT gen 0        _        _      _ s = (Nothing, gen, s)
-probSAT gen maxTries maxFlips (a:as) f s@(Stat r _) = case search gen maxFlips a f 0 of
-  (Nothing, gen', _) -> probSAT gen' (maxTries - 1) maxFlips as f (Stat (r+1) 0)
-  (Just a, gen', fl) -> (Just a, gen', Stat r fl)
+getFlips :: SolverResult -> Int
+getFlips (SolverResult _ _ f) = f
 
-
-search :: StdGen -> Int -> Assignment -> Formula -> Int -> (Maybe Assignment, StdGen, Int)
-search gen 0        _ _ fl = (Nothing, gen, fl)
-search gen maxFlips a f@(Formula _ cls) fl
-  | a `satisfies` f = (Just a, gen, fl)
-  | otherwise       = search gen'' (maxFlips - 1) (flipVar l a) f (fl + 1)
-  where
-    unsat = Set.filter (not . satisfies a) cls
-    (r, gen') = randomR (0,Set.size unsat - 1) gen
-    Clause (l1,l2,l3) = Set.elemAt r unsat
-    totalScore = score (getLit l1) a f + score (getLit l2) a f + score (getLit l3) a f
-    (l, gen'') = distro gen'
-      [ (getLit l1, score (getLit l1) a f / totalScore)
-      , (getLit l2, score (getLit l2) a f / totalScore)
-      , (getLit l3, score (getLit l3) a f / totalScore) ]
-
-distro :: StdGen -> [(a, Double)] -> (a, StdGen)
-distro gen ds = (findGood (prepare 0 ds), gen')
-  where
-    (r, gen') = random gen
-
-    prepare _ [] = []
-    prepare acc ((x,p):ps) = (x,p+acc) : prepare (acc + p) ps
-
-    findGood [] = error "fuck this"
-    findGood ((x,p):ps)
-      | r < p     = x
-      | otherwise = findGood ps
-
-score :: Int -> Assignment -> Formula -> Double
-score i a (Formula _ cls) = cb ** (-break)
-  where
-    sat = Set.filter (satisfies a) cls
-    unsat = Set.filter (not . satisfies (flipVar i a)) cls
-    broken = Set.intersection sat unsat
-    break = toEnum $ Set.size broken
-
-    cb = 2.5
+getTries :: SolverResult -> Int
+getTries (SolverResult _ t _) = t
 
 --------------------------------------------------------------------------------
--- 'New' Solver ----------------------------------------------------------------
+-- Utilities -------------------------------------------------------------------
 --------------------------------------------------------------------------------
 
+-- From https://hackage.haskell.org/package/MonadRandom-0.5.1/docs/src/Control-Monad-Random-Class.html#fromList
 
-entropySAT :: StdGen -> Int -> Int -> [Assignment] -> Formula -> Stat -> (Maybe Assignment, StdGen, Stat)
-entropySAT gen 0        _        _      _ s = (Nothing, gen, s)
-entropySAT gen maxTries maxFlips (a:as) f s@(Stat t 0) = case search' gen maxFlips a f 0 of
-  (Nothing, gen', _) -> entropySAT gen' (maxTries - 1) maxFlips as f (Stat t 0)
-  (Just a, gen', fl)  -> (Just a, gen', Stat t fl)
+-- | Sample a random value from a weighted list.  The list must be
+--   non-empty and the total weight must be non-zero.
+fromList :: (MonadRandom m) => [(a, Double)] -> m a
+fromList ws = do
+  ma <- fromListMay ws
+  case ma of
+    Nothing -> error "Control.Monad.Random.Class.fromList: empty list, or total weight = 0"
+    Just a  -> return a
+
+-- | Sample a random value from a weighted list.  Return @Nothing@ if
+--   the list is empty or the total weight is zero.
+fromListMay :: (MonadRandom m) => [(a, Double)] -> m (Maybe a)
+fromListMay xs = do
+  let s    = sum (map snd xs) :: Double
+      cums = scanl1 (\ ~(_,q) ~(y,s') -> (y, s'+q)) xs
+  case s of
+    0 -> return Nothing
+    _ -> do
+      p <- getRandomR (0, s)
+      return . Just . fst . head . dropWhile ((< p) . snd) $ cums
 
 
-search' :: StdGen -> Int -> Assignment -> Formula -> Int -> (Maybe Assignment, StdGen, Int)
-search' gen 0        _ _ fl = (Nothing, gen, fl)
-search' gen maxFlips a f@(Formula _ cls) fl
-  | a `satisfies` f = (Just a, gen, fl)
-  | otherwise       = -- DEBUG.trace
-      -- ("Clause: " ++ show c ++ "\n" ++ "Entropy: " ++ show (entropy a f c) ++ "\n" ++ "p: " ++ show p ++ "\nSum: " ++ (show $ p1 + p2 + p3))
-      (search' gen' (maxFlips - 1) (flipVar l a) f (fl+1))
+--------------------------------------------------------------------------------
+-- Generic ProbSAT -------------------------------------------------------------
+--------------------------------------------------------------------------------
+
+solver :: Selector -> StdGen -> Tries -> Flips -> [Assignment] -> Formula -> (Maybe SolverResult, StdGen)
+solver selector gen tries flips supply formula = runRand (solver' selector tries flips supply 0 formula) gen
+
+solver' :: Selector -> Tries -> Flips -> [Assignment] -> Tries -> Formula -> Rand StdGen (Maybe SolverResult)
+solver' _        0        _        _      _     _ = pure Nothing
+solver' _        _        _        []     _     _ = pure Nothing
+solver' selector maxTries maxFlips (a:as) tries f = do
+  mr <- search maxFlips selector 0 a f
+  case mr of
+    Nothing         -> solver' selector (maxTries - 1) maxFlips as (tries + 1) f
+    Just (a',flips) -> pure $ Just $ SolverResult a' tries flips
+
+search :: Flips -> Selector -> Flips -> Assignment -> Formula -> Rand StdGen (Maybe (Assignment, Flips))
+search 0        _        _     _ _ = pure Nothing
+search maxFlips selector flips a f@(Formula _ cls)
+  | a `satisfies` f = pure $ Just (a, flips)
+  | otherwise       = do
+      variable <- selector a cls
+      search (maxFlips - 1) selector (flips + 1) (flipVar variable a) f
+
+
+--------------------------------------------------------------------------------
+-- Normal ProbSAT --------------------------------------------------------------
+--------------------------------------------------------------------------------
+
+type Score = Set Clause -> Assignment -> Variable -> Double
+
+probSAT :: Score -> StdGen -> Tries -> Flips -> [Assignment] -> Formula -> (Maybe SolverResult, StdGen)
+probSAT score = solver $ \assignment clauses -> do
+  let unsat = Set.filter (not . satisfies assignment) clauses
+  Clause (x,y,z) <- uniform unsat
+  let lits = map getLit [x,y,z]
+      [sx,sy,sz] = map (score clauses assignment) lits
+      total = sx + sy + sz
+  l <- fromList [(x,sx/total),(y,sy/total),(z,sz/total)]
+  pure (getLit l)
+
+
+scorePoly :: Double  -- ^ c_m
+          -> Double  -- ^ c_b
+          -> Double  -- ^ eps
+          -> Score
+scorePoly cMake cBreak eps clauses assignment variable = (m ** cMake) / (eps + b ** cBreak)
   where
-    unsat = Set.filter (not . satisfies a) cls
-    c@(Clause (l1,l2,l3)) = minimumBy (compare `on` entropy a f) unsat
-    totalScore = score (getLit l1) a f + score (getLit l2) a f + score (getLit l3) a f
-    p@(p1,p2,p3) =
-      ( score (getLit l1) a f / totalScore
-      , score (getLit l2) a f / totalScore
-      , score (getLit l3) a f / totalScore)
-    (l, gen') = distro gen
-      [ (getLit l1, p1)
-      , (getLit l2, p2)
-      , (getLit l3, p3) ]
+    m = makeScore  clauses assignment variable
+    b = breakScore clauses assignment variable
+
+scoreExp :: Double  -- ^ c_m
+         -> Double  -- ^ c_b
+         -> Double  -- ^ eps
+         -> Score
+scoreExp cMake cBreak eps clauses assignment variable
+  = (cMake ** m) / (cBreak ** b)
+  where
+    m = makeScore  clauses assignment variable
+    b = breakScore clauses assignment variable
+
+makeScore :: Set Clause -> Assignment -> Variable -> Double
+makeScore cs a v = toEnum made
+  where
+    sat   = Set.filter (satisfies (flipVar v a)) cs
+    unsat = Set.filter (not . satisfies a) cs
+    made  = Set.size $ Set.intersection sat unsat
+
+breakScore :: Set Clause -> Assignment -> Variable -> Double
+breakScore cs a v = toEnum broken
+  where
+    unsat  = Set.filter (satisfies (flipVar v a)) cs
+    sat    = Set.filter (not . satisfies a) cs
+    broken = Set.size $ Set.intersection sat unsat
+
+--------------------------------------------------------------------------------
+-- ProbSAT using Entropy -------------------------------------------------------
+--------------------------------------------------------------------------------
+
+probSATWithEntropy :: Score -> StdGen -> Tries -> Flips -> [Assignment] -> Formula -> (Maybe SolverResult, StdGen)
+probSATWithEntropy score = solver $ \assignment clauses -> do
+  let unsat          = Set.filter (not . satisfies assignment) clauses
+      Clause (x,y,z) = minimumBy (compare `on` entropy clauses assignment score) unsat
+      lits           = map getLit [x,y,z]
+      [sx,sy,sz]     = map (score clauses assignment) lits
+      total          = sx + sy + sz
+  l <- fromList [(x,sx/total),(y,sy/total),(z,sz/total)]
+  pure (getLit l)
 
 log2 :: Double -> Double
 log2 = logBase 2
 
-entropy :: Assignment -> Formula -> Clause -> Double
-entropy a f (Clause (l1,l2,l3)) = -p1 * log2 p1 - p2 * log2 p2 - p3 * log2 p3
-  where
-    s1 = score (getLit l1) a f
-    s2 = score (getLit l2) a f
-    s3 = score (getLit l3) a f
-    total = s1 + s2 + s3
-    p1 = s1 / total
-    p2 = s2 / total
-    p3 = s3 / total
+entropy' :: [Double] -> Double
+entropy' = sum . map (\p -> - p * log2 p)
 
-entropy' :: Assignment -> Formula -> Clause -> Double
-entropy' a f (Clause (l1,l2,l3)) = -p1 * log2 p1 - p2 * log2 p2 - p3 * log2 p3
+entropy :: Set Clause -> Assignment -> Score -> Clause -> Double
+entropy clauses assignment score (Clause (lx,ly,lz)) = entropy' (map (/ total) s)
   where
-    s1 = score (getLit l1) a f
-    s2 = score (getLit l2) a f
-    s3 = score (getLit l3) a f
-    total = s1 + s2 + s3
-    p1 = (s1 / total)^2
-    p2 = (s2 / total)^2
-    p3 = (s3 / total)^2
+    lits = map getLit [lx,ly,lz]
+    s@[sx,sy,sz] = map (score clauses assignment) lits
+    total = sx + sy + sz
