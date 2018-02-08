@@ -25,14 +25,15 @@ import Text.Printf
 main :: IO ()
 main = do
   -- Setup parameters
-  args@[n', e', gamma', cb', cm', eps', s] <- getArgs
+  args@[e', n', gamma', cb', cm', eps', s] <- getArgs
   print args
   let n     = read n'                       -- number of variables
       e     = read e'                       -- number of experiments
       gamma = read gamma' :: Double         -- relation m/n
       m     = fromEnum $ toEnum n * gamma   -- number of clauses
-      t     = 1000                          -- number of tries
-      l     = 3*n                           -- number of flips
+      l     = n                             -- maximum of flips per try
+      fl    = n^2                           -- total maximum of flips
+      t     = fl `div` l                    -- maximum of tries
 
       cb    = read cb'                      -- break weight
       cm    = read cm'                      -- make weight
@@ -58,12 +59,18 @@ main = do
     forkIO $ do
       let r = fst $ probSAT scr genS t l as f 
       putMVar mvar1 r
+      case r of
+        Just (a,fl) -> printf "n Thread %-4d: %5d flips.\n" (2*i :: Int) fl
+        Nothing     -> printf "n Thread %-4d found nothing.\n" (2*i :: Int)
       -- putStrLn $ "probSAT finished formula " ++ show i 
 
     -- Sparking thread for probSAT with entropy heuristic
     forkIO $ do
       let r = fst $ probSATWithEntropy scr genS t l as f 
       putMVar mvar2 r
+      case r of
+        Just (a,fl) -> printf "h Thread %-4d: %5d flips.\n" (2*i+1 :: Int) fl
+        Nothing     -> printf "h Thread %d found nothing.\n" (2*i+1 :: Int)
       -- putStrLn $ "probSATWithEntropy finished formula " ++ show i 
 
     -- putStrLn $ "Threads for Formula " ++ show i ++ " sparked."
@@ -78,7 +85,7 @@ main = do
       (Just (a1, fl1), Just (a2, fl2))
         -- For debuggin reasons (who knows, what may happen...)
         | not (a1 `satisfies` f) -> do
-            error $ "probSAT error: " ++ show a1 ++ " does not satisfy " ++ show f            
+            error $ "probSAT error: " ++ show a1 ++ " does not satisfy " ++ show f
         | not (a2 `satisfies` f) -> do
             error $ "probSATWithEntropy error: " ++ show a2 ++ " does not satisfy " ++ show f
         -- expected cases
