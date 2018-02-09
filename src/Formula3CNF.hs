@@ -7,6 +7,9 @@ import Data.List (intercalate)
 
 -- import Control.Arrow ((>>>), (<<<))
 
+import Data.Vector (Vector)
+import qualified Data.Vector as Vector
+
 import Assignment
 
 
@@ -49,15 +52,15 @@ satisfiedLiterals a (Clause (l1,l2,l3)) = ind (satisfies a l1) + ind (satisfies 
     ind True  = 1
     ind False = 0
 
-data Formula = Formula Int !(Set Clause)
+data Formula = Formula Int !(Vector Clause)
 
 
 instance Show Formula where
-  show (Formula _ cls) = intercalate " , " (map show (Set.toList cls))
+  show (Formula _ cls) = intercalate " , " (map show (Vector.toList cls))
 
 
 instance Satisfies Formula where
-  satisfies a (Formula _ cls) = all (satisfies a) cls
+  satisfies a (Formula _ cls) = Vector.all (satisfies a) cls
 
 
 
