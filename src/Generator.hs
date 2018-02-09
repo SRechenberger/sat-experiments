@@ -19,9 +19,12 @@ import qualified Data.Set as Set
 
 import Data.List (sort)
 
+import Data.Vector (Vector)
+import qualified Data.Vector as Vector
+
 
 generate3CNF :: StdGen -> Int -> Int -> (Formula, StdGen)
-generate3CNF gen n m = (Formula n f, gen'')
+generate3CNF gen n m = (Formula n (Vector.fromList $ Set.toList f), gen'')
   where
     (a, gen')  = randomAssignment gen n
     (f, gen'') = generate3CNF' gen n m a Set.empty
