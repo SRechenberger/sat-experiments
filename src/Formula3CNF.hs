@@ -26,6 +26,14 @@ getLit :: Literal -> Int
 getLit (Pos x) = x
 getLit (Neg x) = x
 
+isPos :: Literal -> Bool
+isPos (Pos _) = True
+isPos _       = False
+
+isNeg :: Literal -> Bool
+isNeg (Neg _) = True
+isNeg _       = False
+
 instance Satisfies Literal where
   satisfies a (Pos x) = testVar x a
   satisfies a (Neg x) = not $ testVar x a
@@ -38,6 +46,8 @@ instance Show Literal where
 newtype Clause = Clause (Literal, Literal, Literal)
   deriving (Eq, Ord)
 
+clauseToList :: Clause -> [Literal]
+clauseToList (Clause (x,y,z)) = [x,y,z]
 
 instance Show Clause where
   show (Clause (c1,c2,c3)) = "(" ++ show c1 ++ " , " ++ show c2 ++ " , " ++ show c3 ++ ")"
@@ -45,6 +55,9 @@ instance Show Clause where
 
 instance Satisfies Clause where
   satisfies a (Clause (l1,l2,l3)) = satisfies a l1 || satisfies a l2 || satisfies a l3
+
+containsLiteral :: Literal -> Clause -> Bool
+containsLiteral l (Clause (l1, l2, l3)) = l1 == l || l2 == l || l3 == l
 
 satisfiedLiterals :: Assignment -> Clause -> Int
 satisfiedLiterals a (Clause (l1,l2,l3)) = ind (satisfies a l1) + ind (satisfies a l2) + ind (satisfies a l3)

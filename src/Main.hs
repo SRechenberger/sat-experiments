@@ -25,22 +25,21 @@ import Text.Printf
 main :: IO ()
 main = do
   -- Setup parameters
-  args@[e', n', gamma', cb', cm', eps', s] <- getArgs
+  args@[e', n', gamma', cb', eps', s] <- getArgs
   print args
   let n     = read n'                       -- number of variables
       e     = read e'                       -- number of experiments
       gamma = read gamma' :: Double         -- relation m/n
       m     = fromEnum $ toEnum n * gamma   -- number of clauses
       l     = n                             -- maximum of flips per try
-      fl    = n^2                           -- total maximum of flips
+      fl    = fromEnum $ 20*(4/3)^n         -- total maximum of flips
       t     = fl `div` l                    -- maximum of tries
 
       cb    = read cb'                      -- break weight
-      cm    = read cm'                      -- make weight
       eps   = read eps'
   let scr = case s of
-              "poly" -> scorePoly cm cb eps
-              "exp" -> scoreExp cm cb eps
+              "poly" -> scorePoly cb eps
+              "exp" -> scoreExp cb eps
               other -> error $ "Option \"" ++ other ++"\" is no valid option."
 
   -- Generating Formulas

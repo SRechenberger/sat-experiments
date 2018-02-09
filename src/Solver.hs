@@ -12,16 +12,21 @@ import qualified Data.Set as Set
 import Data.Vector (Vector)
 import qualified Data.Vector as Vector
 
+import Data.Map (Map)
+import qualified Data.Map as Map
+
 import Data.Foldable (minimumBy, maximumBy)
 
 import Data.Function (on)
+
+import Text.Printf (printf)
 
 import qualified Debug.Trace as DEBUG
 
 type Tries = Int
 type Flips = Int
 type Variable = Int
-type Selector = Assignment -> Vector Clause -> Rand StdGen Variable
+type Selector = ScoreBoard -> Assignment -> Vector Clause -> Rand StdGen Literal
 
 type SolverResult = (Assignment, Flips)
 
@@ -44,7 +49,7 @@ solver' :: Selector -> Tries -> Flips -> [Assignment] -> Flips -> Formula -> Ran
 solver' _        0        _        _      _     _                 = pure Nothing
 solver' _        _        _        []     _     _                 = pure Nothing
 solver' selector maxTries maxFlips (a:as) flips f@(Formula _ cls) = do
-  mr <- search maxFlips a
+  mr <- search maxFlips a (makeScoreBoard f)
   case mr of
     -- if the 'search' was unsuccessful, repeat
     Nothing          -> solver' selector (maxTries - 1) maxFlips as (flips + maxFlips) f
@@ -53,95 +58,72 @@ solver' selector maxTries maxFlips (a:as) flips f@(Formula _ cls) = do
     -- including all restarts (#restarts * maxFlips)
     Just (a',flips') -> pure $ Just $ (a', flips + (maxFlips - flips'))
  where
-    search :: Flips -> Assignment -> Rand StdGen (Maybe (Assignment, Flips))
-    search 0        _ = pure Nothing
-    search maxFlips a 
+    search :: Flips -> Assignment -> ScoreBoard -> Rand StdGen (Maybe (Assignment, Flips))
+    search 0        _ _ = pure Nothing
+    search maxFlips a sb
       -- if a satisfying assignment is found, return it and the remaining flips
       | a `satisfies` f = pure $ Just (a, maxFlips)
       -- otherweise choose a literal, flip it and repeat
       | otherwise       = do
-          variable <- selector a cls
-          search (maxFlips - 1) (flipVar variable a)
+          literal <- selector sb a cls
+          search (maxFlips - 1) (flipVar (getLit literal) a) sb
 
 
 --------------------------------------------------------------------------------
 -- Normal ProbSAT --------------------------------------------------------------
 --------------------------------------------------------------------------------
 
-type Score = Vector Clause -> Assignment -> Variable -> Double
+type Score = ScoreBoard -> Assignment -> Literal -> Double
 
 probSAT :: Score -> StdGen -> Tries -> Flips -> [Assignment] -> Formula -> (Maybe SolverResult, StdGen)
-probSAT score = solver $ \assignment clauses -> do
+probSAT score = solver $ \scoreboard assignment clauses -> do
   let unsat = Vector.filter (not . satisfies assignment) clauses
   Clause (x,y,z) <- uniform unsat
-  let lits = map getLit [x,y,z]
-      ss@[sx,sy,sz] = map (score clauses assignment) lits
+  let lits = [x,y,z]
+      ss@[sx,sy,sz] = map (score scoreboard assignment) lits
       total = sx + sy + sz
       [px,py,pz] = map (/ total) ss
   r <- getRandomR (0,1)
   let l | r <= px    = x
         | r <= px+py = y
         | otherwise  = z
-  pure (getLit l)
+  pure l
 
 
-scorePoly :: Double  -- ^ c_m
-          -> Double  -- ^ c_b
+scorePoly :: Double  -- ^ c_b
           -> Double  -- ^ eps
           -> Score
-scorePoly cMake cBreak eps clauses assignment variable = (m ** cMake) / (eps + b ** cBreak)
+scorePoly cBreak eps sb assgn variable = 1 / (eps + b ** cBreak)
   where
-    m = makeScore  clauses assignment variable
-    b = breakScore clauses assignment variable
+    b = getBreakScore variable assgn sb
 {-# INLINE scorePoly #-}
 
 
-scoreExp :: Double  -- ^ c_m
-         -> Double  -- ^ c_b
+scoreExp :: Double  -- ^ c_b
          -> Double  -- ^ eps
          -> Score
-scoreExp cMake cBreak eps clauses assignment variable = (cMake ** m) / (eps + cBreak ** b)
+scoreExp cBreak eps sb assgn variable = 1 / (eps + cBreak ** b)
   where
-    m = makeScore  clauses assignment variable
-    b = breakScore clauses assignment variable
+    b = getBreakScore variable assgn sb
 {-# INLINE scoreExp #-}
 
-
-makeScore :: Vector Clause -> Assignment -> Variable -> Double
-makeScore cs a v = toEnum made
-  where
-    made = count (\c -> satisfies (flipVar v a) c && not (satisfies a c)) cs
-{-# INLINE makeScore #-}
-
-
-breakScore :: Vector Clause -> Assignment -> Variable -> Double
-breakScore cs a v = toEnum broken
-  where
-    broken = count (\c -> not (satisfies (flipVar v a) c) && satisfies a c) cs
-{-# INLINE breakScore #-}
-
-count :: (a -> Bool) -> Vector a -> Int
-count p = Vector.map p' >>> Vector.sum
-  where
-    p' x | p x       = 1
-         | otherwise = 0
 --------------------------------------------------------------------------------
 -- ProbSAT using Entropy -------------------------------------------------------
 --------------------------------------------------------------------------------
 
 probSATWithEntropy :: Score -> StdGen -> Tries -> Flips -> [Assignment] -> Formula -> (Maybe SolverResult, StdGen)
-probSATWithEntropy score = solver $ \assignment clauses -> do
+probSATWithEntropy score = solver $ \scoreboard assignment clauses -> do
   let unsat          = Vector.filter (not . satisfies assignment) clauses
-      c@(Clause (x,y,z)) = minimumBy (compare `on` entropy clauses assignment score) unsat
-      lits           = map getLit [x,y,z]
-      ss@[sx,sy,sz]  =  map (score clauses assignment) lits
+      c@(Clause (x,y,z)) = minimumBy (compare `on` entropy scoreboard assignment score) unsat
+      lits           = [x,y,z]
+      ss@[sx,sy,sz]  = map (score scoreboard assignment) lits
       total          = sx + sy + sz
       [px,py,pz] = map (/ total) ss
   r <- getRandomR (0,1)
   let l | r <= px    = x
         | r <= px+py = y
         | otherwise  = z
-  pure (getLit l)
+  pure l
 
 
 log2 :: Double -> Double
@@ -154,9 +136,93 @@ entropy' p1 p2 p3 = - p1 * log2 p1 - p2 * log2 p2 - p3 * log2 p3
 {-# INLINE entropy' #-}
 
 
-entropy :: Vector Clause -> Assignment -> Score -> Clause -> Double
-entropy clauses assignment score (Clause (lx,ly,lz)) = entropy' (sx/total) (sy/total) (sz/total)
+entropy :: ScoreBoard -> Assignment -> Score -> Clause -> Double
+entropy sb assgn score (Clause (lx,ly,lz)) = entropy' (sx/total) (sy/total) (sz/total)
   where
-    s@[sx,sy,sz] = map (getLit >>> score clauses assignment) [lx,ly,lz]
+    s@[sx,sy,sz] = map (score sb assgn) [lx,ly,lz]
     total = sx + sy + sz
 {-# INLINE entropy #-}
+
+--------------------------------------------------------------------------------
+-- Scoreboard ------------------------------------------------------------------
+--------------------------------------------------------------------------------
+
+type ScoreBoard = Map Variable BoardLine
+
+data BoardLine = BoardLine
+  { positives :: Vector Clause
+  , negatives :: Vector Clause
+  -- , breaks    :: !Int
+  }
+  deriving Show
+
+makeScoreBoard :: Formula -> ScoreBoard
+makeScoreBoard (Formula varCnt cs) = Map.fromList
+  [(i, makeBoardLine cs i) | i <- [0..varCnt-1]]
+
+makeBoardLine :: Vector Clause -> Int -> BoardLine
+makeBoardLine clauses var = BoardLine
+  { positives = poss
+  , negatives = negs
+--  , breaks    = if testVar var assgn
+--    then count (\c -> satisfiedLiterals assgn c == 1) poss
+--    else count (\c -> satisfiedLiterals assgn c == 1) negs
+  }
+
+ where
+  poss = Vector.filter (containsLiteral (Pos var)) clauses
+  negs = Vector.filter (containsLiteral (Neg var)) clauses
+
+
+getBreakScore :: Literal -> Assignment -> ScoreBoard -> Double
+getBreakScore lit assgn sb = toEnum $ case Map.lookup (getLit lit) sb of
+  Nothing -> error $ printf "getBreakScore: missing variable: %d" (getLit lit)
+  Just ln
+    | testVar (getLit lit) assgn -> count (\c -> satisfiedLiterals assgn c == 1) (positives ln)
+    | otherwise              -> count (\c -> satisfiedLiterals assgn c == 1) (negatives ln)
+{-
+getBreakScore' :: Int -> ScoreBoard -> Double
+getBreakScore' i sb = case Map.lookup i sb of
+  Nothing -> error $ printf "getBreakScore': missing variable: %d" i
+  Just sb -> toEnum $ breaks sb
+
+updateBreakScore' :: Literal -> Assignment -> ScoreBoard -> ScoreBoard
+updateBreakScore' lit assgn sb = case Map.lookup (getLit lit) sb of
+  Nothing -> error $ printf "updateBreakScore: missing variable: %d" (getLit lit)
+  Just ln -> let (ln', updates) = updateBreakScore' assgn lit ln
+                 sb' = Map.insert (getLit lit) ln' sb
+              in foldl (\sb (i,v) -> Map.adjust (\bl -> bl { breaks = v + breaks bl} ) i sb) sb' updates
+
+
+updateBreakScore' :: Assignment -> Literal -> BoardLine -> (BoardLine, [(Variable, Int)])
+updateBreakScore' assgn lit bl = (bl', updates)
+ where
+  bl' = bl
+    { breaks = if isPos lit
+      then count (\c -> satisfiedLiterals assgn c == 0) (negatives bl)
+      else count (\c -> satisfiedLiterals assgn c == 0) (positives bl)
+    }
+  updates = Map.toList updatesPos ++ Map.toList (Map.map negate updatesNeg)
+  updatesPos'
+    | testVar (getLit lit) assgn = positives bl
+    | otherwise                  = negatives bl
+  updatesPos = Map.delete (getLit lit) $ countOccs updatesPos'
+  updatesNeg'
+    | testVar (getLit lit) assgn = negatives bl
+    | otherwise                  = positives bl
+  updatesNeg = Map.delete (getLit lit) $ countOccs updatesNeg'
+
+countOccs :: Vector Clause -> Map Variable Int
+countOccs = Vector.foldl u (Map.empty)
+  where
+    u :: Map Variable Int -> Clause -> Map Variable Int
+    u m c = foldl (\m' i -> Map.alter u' i m') m (map getLit $ clauseToList c)
+
+    u' Nothing  = Just 1
+    u' (Just x) = Just $ x + 1
+-}
+count :: (a -> Bool) -> Vector a -> Int
+count p = Vector.map p' >>> Vector.sum
+  where
+    p' x | p x       = 1
+         | otherwise = 0
